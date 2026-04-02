@@ -8,7 +8,7 @@ p.m  = [20; 15; 10];       % Link masses            [kg]
 p.Iz = [0.5; 0.2; 0.1];   % Z-axis (planar) inertia [kg·m²]
 p.lc = p.L / 2;            % CoM at link midpoint
 p.g  = 9.81;               % Gravitational accel.   [m/s²]
-p.friction = [20; 15; 10];  % viscous friction constants
+p.friction = [200; 150; 100];  % viscous friction constants
 
 %% ── Initial Conditions ─────────────────────────────────────────
 q0  = [10; 20; 30] * (pi/180);   % Initial angles    [rad]
@@ -173,24 +173,14 @@ function dx = state_space(~, x, tau, p)
     M   = mass_matrix(q, p);
     C   = coriolis_matrix(q, dq, p);
     G   = gravity_vector(q, p);
-    tau_friction = friction(dq, p);
 
+    friction_tau = p.friction.* x(4:6);
+    tau = tau + friction_tau;
 
-    % Solve M*q'' = tau - C*q' - G + tau_friction
-    ddq = M \ (tau - C*dq - G + tau_friction);
+    % Solve M*q'' = tau - C*q' - G  for q'' (backslash = LU solve)
+    ddq = M \ ((tau - C*dq - G);
     dx  = [dq; ddq];
 end
-
-
-
-%_________________________________________________________
-function tau_friction = friction(dq, p)
-% friction computes a torque due to viscous friction. 
-% tau = b * q'
-% 3x1 torque vector for each joint's friction, already negated. 
-    tau_friction = -1*p.friction.*dq;
-end
-
 
 % ─────────────────────────────────────────────────────────────────
 function M = mass_matrix(q, p)
