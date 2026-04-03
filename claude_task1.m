@@ -5,10 +5,10 @@ clear; clc; close all;
 %% ── Robot Parameters ──────────────────────────────────────────
 p.L  = [4;  3;  2 ];       % Link lengths           [m]
 p.m  = [20; 15; 10];       % Link masses            [kg]
-p.Iz = [0.5; 0.2; 0.1];   % Z-axis (planar) inertia [kg·m²]
+p.Iz = [0.5; 0.2; 0.1];    % Z-axis (planar) inertia [kg·m²]
 p.lc = p.L / 2;            % CoM at link midpoint
 p.g  = 9.81;               % Gravitational accel.   [m/s²]
-p.friction = [20; 15; 10];  % viscous friction constants
+p.friction = [20; 15; 10]; % viscous friction constants
 
 %% ── Initial Conditions ─────────────────────────────────────────
 q0  = [10; 20; 30] * (pi/180);   % Initial angles    [rad]
