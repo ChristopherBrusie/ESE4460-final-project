@@ -342,3 +342,7 @@ function joints = forward_kinematics(q1, q2, q3, p)
 
     joints = [Px'; Py'];   % 2×4
 end
+
+
+
+
