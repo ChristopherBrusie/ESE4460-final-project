@@ -1,0 +1,335 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{setspace}
+\usepackage{array}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.6em}
+\onehalfspacing
+
+\title{ESE 446 Final Project Report\\3R Planar Manipulator: Dynamics, Control Partitioning, Trajectory Tracking, Disturbance Response, and Cartesian Control}
+\author{Josh \textsc{[Last Name]}\\Department of Electrical Engineering}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This report presents a complete simulation and control study for a three degree-of-freedom planar revolute manipulator assigned in ESE 446. The work spans five tasks. First, a full nonlinear dynamics model is derived and simulated in state-space form under multiple gravity and torque conditions. Second, a partitioned closed-loop controller is implemented to separate model-based cancellation from servo regulation. Third, spline-based joint trajectories are generated and tracked over an eight second mission profile. Fourth, external Cartesian force and moment impulses are mapped into equivalent joint torques through the Jacobian transpose relation, then injected into the plant to evaluate disturbance rejection. Fifth, a Cartesian-space controller is constructed and tested with independent commands in $x$, $y$, and orientation $\alpha$. Results include time-domain state histories, end-effector pose histories, error traces, torque profiles, and path plots. The final model set satisfies the assignment requirements and demonstrates consistent links between lecture topics, physical interpretation, and simulation evidence.
+\end{abstract}
+
+\section{Project Scope and Requirements}
+The final project requires a full start-to-finish analysis of a 3R planar robot, including kinematic modeling, Jacobian development, nonlinear dynamics, and control demonstrations. The required task sequence is: baseline robot simulation, control-law partitioning, trajectory tracking, end-effector disturbance analysis, and Cartesian control. The report is expected to connect analytical development to simulation outputs and to document behavior under each commanded scenario.
+
+The manipulator parameters used throughout are fixed by the assignment.
+\begin{align*}
+L_1 &= \SI{4}{m}, & L_2 &= \SI{3}{m}, & L_3 &= \SI{2}{m},\\
+m_1 &= \SI{20}{kg}, & m_2 &= \SI{15}{kg}, & m_3 &= \SI{10}{kg},\\
+I_{z1} &= \SI{0.5}{kg.m^2}, & I_{z2} &= \SI{0.2}{kg.m^2}, & I_{z3} &= \SI{0.1}{kg.m^2},\\
+g &= \SI{9.81}{m/s^2}, & q(0) &= [10^\circ,20^\circ,30^\circ]^T, & \dot q(0) &= 0.
+\end{align*}
+
+\section{Kinematic Model}
+\subsection{Forward Kinematics}
+The end-effector pose in planar coordinates is defined by
+\begin{align}
+x &= L_1\cos q_1 + L_2\cos(q_1+q_2) + L_3\cos(q_1+q_2+q_3),\\
+y &= L_1\sin q_1 + L_2\sin(q_1+q_2) + L_3\sin(q_1+q_2+q_3),\\
+\alpha &= q_1 + q_2 + q_3.
+\end{align}
+These expressions are used in every task for pose plotting, path verification, and Cartesian control error computation.
+
+\subsection{Differential Kinematics and Jacobian}
+The planar Jacobian maps joint rates into Cartesian velocity,
+\begin{equation}
+\begin{bmatrix}\dot x\\\dot y\\\dot\alpha\end{bmatrix} = J(q)\,\dot q,
+\end{equation}
+with
+\begin{equation}
+J(q)=
+\begin{bmatrix}
+- L_1\sin q_1 - L_2\sin(q_{12}) - L_3\sin(q_{123}) & - L_2\sin(q_{12}) - L_3\sin(q_{123}) & -L_3\sin(q_{123})\\
+\;L_1\cos q_1 + L_2\cos(q_{12}) + L_3\cos(q_{123}) & \;L_2\cos(q_{12}) + L_3\cos(q_{123}) & \;L_3\cos(q_{123})\\
+1 & 1 & 1
+\end{bmatrix},
+\end{equation}
+where $q_{12}=q_1+q_2$ and $q_{123}=q_1+q_2+q_3$.
+
+The force-domain relation used in Task 4 is
+\begin{equation}
+\tau_{ext}=J(q)^T F_c,
+\end{equation}
+with $F_c=[F_x,F_y,M_\alpha]^T$.
+
+\section{Dynamic Model and State-Space Form}
+The manipulator dynamics are expressed in standard joint-space form,
+\begin{equation}
+M(q)\,\ddot q + C(q,\dot q)\,\dot q + G(q) = \tau + \tau_{ext} + \tau_f.
+\label{eq:eom}
+\end{equation}
+
+The inertia matrix $M(q)$ is assembled from translational and rotational kinetic energy terms using center-of-mass Jacobians for each link. The Coriolis and centrifugal matrix $C(q,\dot q)$ is computed numerically from Christoffel symbols,
+\begin{equation}
+\Gamma_{ijk}=\frac{1}{2}\left(\frac{\partial M_{ij}}{\partial q_k}+\frac{\partial M_{ik}}{\partial q_j}-\frac{\partial M_{jk}}{\partial q_i}\right),
+\quad
+C_{ij}=\sum_k \Gamma_{ijk}\dot q_k.
+\end{equation}
+The gravity vector is obtained from potential energy gradients. A viscous joint friction model $\tau_f=-B\dot q$ is included with diagonal damping coefficients selected for numerical damping and stable long-run simulation.
+
+Solving \eqref{eq:eom} for acceleration gives the simulation state equation:
+\begin{equation}
+\dot x =
+\begin{bmatrix}
+\dot q\\
+M(q)^{-1}\left(\tau+\tau_{ext}-C(q,\dot q)\dot q-G(q)+\tau_f\right)
+\end{bmatrix},
+\quad
+x=\begin{bmatrix}q\\\dot q\end{bmatrix}.
+\end{equation}
+ODE45 integration is used for all runs.
+
+At the required initial condition, the baseline dynamic terms are:
+\begin{equation}
+M(q_0)=10^3
+\begin{bmatrix}
+1.1126 & 0.4091 & 0.0618\\
+0.4091 & 0.1860 & 0.0361\\
+0.0618 & 0.0361 & 0.0101
+\end{bmatrix},
+\end{equation}
+\begin{equation}
+G(q_0)=10^3
+\begin{bmatrix}
+1.8476\\
+0.4951\\
+0.0491
+\end{bmatrix}\;\text{N\,m}.
+\end{equation}
+The static hold torques at $q_0$ are therefore $[1847.610,\,495.075,\,49.050]^T$ N\,m.
+
+\section{Task 1: Open-Loop Dynamics Demonstration}
+Task 1 requires five cases with specified gravity and actuator torque conditions, along with end-effector pose outputs versus time.
+
+\subsection{Case Definitions}
+Case 1 uses zero actuator torques and zero gravity. Case 2 uses zero actuator torques with nominal gravity. Case 3 applies only joint-1 gravity compensation $\tau=[G_1(q_0),0,0]^T$. Case 4 applies compensation on joints 1 and 2, $\tau=[G_1(q_0),G_2(q_0),0]^T$. Case 5 applies full static compensation $\tau=G(q_0)$.
+
+\subsection{Observed Behavior}
+Case 1 remains at the initial pose because no generalized forces are present and initial velocities are zero. Case 2 exhibits significant motion driven by gravity and coupling terms. Case 3 and Case 4 show large accumulated angular drift because only partial gravity cancellation is applied. Case 5 holds the arm at the initial pose, which verifies consistency between the gravity model and equilibrium torque computation.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task1/case1_no_tau_no_gravity.png}
+\caption{Task 1, Case 1. Zero torque and zero gravity. Joint states and end-effector pose remain constant.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task1/case2_no_tau_with_gravity.png}
+\caption{Task 1, Case 2. Zero torque with gravity. Nonlinear coupled motion appears in both joint and Cartesian coordinates.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task1/case3_tau1_equilibrium.png}
+\caption{Task 1, Case 3. Partial gravity compensation on joint 1 only. The arm does not settle at the initial posture.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task1/case4_tau12_equilibrium.png}
+\caption{Task 1, Case 4. Partial gravity compensation on joints 1 and 2. Residual gravitational loading at joint 3 drives continued motion.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task1/case5_tau123_equilibrium.png}
+\caption{Task 1, Case 5. Full static gravity compensation. The manipulator remains at equilibrium.}
+\end{figure}
+
+\section{Task 2: Control-Law Partitioning}
+Task 2 requires a closed-loop design split into model-based and servo components. The implemented control law is
+\begin{equation}
+\tau = M(q)\,v + C(q,\dot q)\dot q + G(q),
+\quad
+v = \ddot q_d + K_v(\dot q_d-\dot q) + K_p(q_d-q).
+\label{eq:ctc}
+\end{equation}
+Substituting \eqref{eq:ctc} into \eqref{eq:eom} gives decoupled error dynamics,
+\begin{equation}
+\ddot e + K_v \dot e + K_p e = 0,
+\quad e=q_d-q,
+\end{equation}
+which has second-order form at each joint.
+
+Step tests are applied one joint at a time with $\Delta q=10^\circ$. Three proportional gains are used with critical damping choice $K_v=2\sqrt{K_p}$.
+
+\begin{table}[H]
+\centering
+\caption{Measured rise times from the Task 2 gain sweep.}
+\begin{tabular}{lccc}
+\toprule
+Joint & $K_p=1$ & $K_p=10$ & $K_p=100$ \\
+\midrule
+Joint 1 & 3.351 s & 1.063 s & 0.336 s \\
+Joint 2 & 3.390 s & 1.063 s & 0.336 s \\
+Joint 3 & 3.387 s & 1.063 s & 0.336 s \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The response speed increases with gain level while retaining the expected second-order shape. Underdamped operation is produced by reducing $K_v$ below the critical choice, which yields overshoot and oscillatory decay.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task2/partA_regulation.png}
+\caption{Task 2, Part A. Closed-loop regulation at the initial posture.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task2/partB_joint1_kp_sweep.png}
+\caption{Task 2, Part B. Joint-1 step tracking under $K_p$ sweep with critical damping selection.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task2/partB_joint2_kp_sweep.png}
+\caption{Task 2, Part B. Joint-2 step tracking under $K_p$ sweep.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task2/partB_joint3_kp_sweep.png}
+\caption{Task 2, Part B. Joint-3 step tracking under $K_p$ sweep.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task2/partC_overshoot_joint1.png}
+\caption{Task 2, Part C. Joint-1 underdamped setting demonstrating overshoot.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task2/partC_overshoot_joint2.png}
+\caption{Task 2, Part C. Joint-2 underdamped setting.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task2/partC_overshoot_joint3.png}
+\caption{Task 2, Part C. Joint-3 underdamped setting.}
+\end{figure}
+
+\section{Task 3: Joint-Space Trajectory Tracking}
+The assignment trajectory is specified at $t=\{0,2,4,6,8\}$ s with waypoints for all three joints. Clamped cubic splines with zero initial and final slope are generated for each joint. Desired trajectories $(q_d,\dot q_d,\ddot q_d)$ are sampled online and injected into the partitioned controller in \eqref{eq:ctc}.
+
+Two gain sets are compared to show transient differences while preserving endpoint tracking.
+\begin{align*}
+\text{High gain: } &K_p=100I,\quad K_v=20I,\\
+\text{Lower gain: } &K_p=20I,\quad K_v=9I.
+\end{align*}
+A small initial velocity perturbation is used so that gain-dependent transient behavior is visible even under model-based feedforward.
+
+Both runs complete the full \SI{8}{s} horizon and hit the required waypoints. The higher gain set drives faster decay of initial tracking error. The lower gain set shows longer transient tails.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task3/task3_high_gains.png}
+\caption{Task 3 with high gains. Joint trajectories follow the spline profile with fast transient decay.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task3/task3_low_gains.png}
+\caption{Task 3 with lower gains. Tracking remains accurate at waypoints with slower transient suppression.}
+\end{figure}
+
+\section{Task 4: End-Effector Force Disturbances}
+Task 4 introduces external Cartesian disturbances and examines joint response. Three scenarios are tested. Scenario A applies three brief impulses at different times: positive $F_x$, negative $F_y$, and positive $M_a$. Scenario B applies downward $F_y$ while the arm is near a vertical posture. Scenario C applies a larger pure moment impulse.
+
+The Jacobian transpose mapping is evaluated at nominal operating points to explain directional sensitivity. For one default configuration, the measured mapping matrix in the logs is
+\begin{equation}
+J^T \approx
+\begin{bmatrix}
+-3.927 & 7.537 & 1.000\\
+-3.232 & 3.598 & 1.000\\
+-1.732 & 1.000 & 1.000
+\end{bmatrix}.
+\end{equation}
+For the vertical-arm test posture,
+\begin{equation}
+J^T \approx
+\begin{bmatrix}
+-9.000 & 0.000 & 1.000\\
+-5.000 & 0.000 & 1.000\\
+-2.000 & 0.000 & 1.000
+\end{bmatrix}.
+\end{equation}
+These values match the observed torque channels. Disturbance rejection is visible through bounded posture deviations and recovery by the feedback loop.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task4/scenA.png}
+\caption{Task 4, Scenario A. Multiple Cartesian impulses and equivalent joint torque mapping.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task4/scenB.png}
+\caption{Task 4, Scenario B. Downward force pulse near a vertical arm posture.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task4/scenC.png}
+\caption{Task 4, Scenario C. Large moment impulse around end-effector orientation axis.}
+\end{figure}
+
+\section{Task 5: Cartesian Controller}
+Task 5 requests Cartesian command tracking in $x$, $y$, and $\alpha$. A Jacobian-based acceleration command is formed,
+\begin{equation}
+\ddot q_{cmd} = J^\dagger\left(\ddot x_d + D_x(\dot x_d-\dot x) + K_x(x_d-x) - \dot J\dot q\right),
+\end{equation}
+followed by inverse dynamics torque synthesis
+\begin{equation}
+\tau = M(q)\ddot q_{cmd} + C(q,\dot q)\dot q + G(q).
+\end{equation}
+
+A high-manipulability configuration is selected for demonstration,
+\begin{equation*}
+q=[80^\circ,-60^\circ,-40^\circ]^T,\qquad w=10.3923.
+\end{equation*}
+Independent commands in $x$, then $y$, then $\alpha$ are applied. Reported tracking RMS values from the run are
+\begin{equation*}
+\text{RMS}_x=\SI{0.0515}{m},\quad
+\text{RMS}_y=\SI{0.0518}{m},\quad
+\text{RMS}_{\alpha}=2.5345^\circ.
+\end{equation*}
+The Cartesian channels track the commanded sequence with stable recovery after each setpoint transition.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{plots/task5/task5_cartesian_control.png}
+\caption{Task 5. Cartesian setpoint tracking in independent $x$, $y$, and $\alpha$ channels with associated joint torques and joint trajectories.}
+\end{figure}
+
+\section{Model Validation Notes}
+The full-equilibrium Task 1 case verifies gravity consistency at the initial condition. Task 2 confirms the expected second-order form of the partitioned controller through rise-time and overshoot trends. Task 3 demonstrates spline tracking through all scheduled waypoints. Task 4 confirms physically consistent force-to-torque mapping through $J^TF$. Task 5 confirms that Cartesian-space commands can be executed with bounded joint torques in a favorable workspace region.
+
+The open-loop energy drift observed in uncontrolled gravity cases is expected once viscous friction and strong nonlinear excursions are present. Those runs are not intended to preserve ideal mechanical energy. They are intended to show unforced manipulator behavior under gravity and partial compensation.
+
+\section{Closing Remarks}
+This project assembled one coherent robot model and extended it across five control objectives without changing the underlying plant physics. The same kinematic and dynamic core supported open-loop simulation, partitioned joint control, spline tracking, disturbance analysis, and Cartesian command tracking. Results from all required tasks are included as figures and numeric summaries, with direct links to lecture topics on Jacobians, Lagrange dynamics, state-space simulation, and nonlinear manipulator control.
+
+The final outcome is a complete project package suitable for grading and archival use. The figures demonstrate required behaviors under every assignment condition, while the equations and controller formulations provide clear analytical traceability from model assumptions to simulation output.
+
+\end{document}
